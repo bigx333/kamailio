@@ -42,6 +42,7 @@
 #include "../../core/parser/parse_to.h"
 #include "../../core/parser/parse_expires.h"
 #include "../../core/parser/contact/parse_contact.h"
+#include "../../core/parser/msg_parser.h"
 #include "../../core/rpc.h"
 #include "../../core/rpc_lookup.h"
 #include "../../core/rand/kam_rand.h"
@@ -51,6 +52,7 @@
 #include "auth.h"
 #include "auth_hdr.h"
 #include "uac_reg.h"
+#include "uac_send.h"
 
 #define UAC_REG_DISABLED (1 << 0) /* registration disabled */
 #define UAC_REG_ONGOING (1 << 1)  /* registration on progress */
@@ -732,6 +734,109 @@ int uac_reg_tmdlg(dlg_t *tmdlg, sip_msg_t *rpl)
 	return 0;
 }
 
+static void uac_reg_run_reply_event(reg_uac_t *ri, struct tmcb_params *ps)
+{
+	int len;
+	sip_msg_t *msg;
+	str cid;
+	str method = str_init("REGISTER");
+	uac_send_info_t evinfo;
+
+	if(ri == NULL || ps == NULL || ps->code <= 0)
+		return;
+
+	msg = (ps->rpl == FAKED_REPLY) ? NULL : ps->rpl;
+
+	uac_send_info_init(&evinfo);
+
+	evinfo.evroute = 1;
+	evinfo.evcode = ps->code;
+	evinfo.flags = ri->flags;
+	evinfo.evtype = (msg == NULL) ? 2 : 1;
+	evinfo.cseqno = ri->cseq;
+
+	if(method.len < (int)sizeof(evinfo.b_method)) {
+		memcpy(evinfo.s_method.s, method.s, method.len);
+		evinfo.s_method.s[method.len] = '\0';
+		evinfo.s_method.len = method.len;
+	}
+
+	len = snprintf(evinfo.b_ruri, MAX_URI_SIZE, "sip:%.*s", ri->r_domain.len,
+			ri->r_domain.s);
+	if(len >= 0 && len < MAX_URI_SIZE) {
+		evinfo.s_ruri.len = len;
+	}
+
+	len = snprintf(evinfo.b_turi, MAX_URI_SIZE, "sip:%.*s@%.*s",
+			ri->r_username.len, ri->r_username.s, ri->r_domain.len,
+			ri->r_domain.s);
+	if(len >= 0 && len < MAX_URI_SIZE) {
+		evinfo.s_turi.len = len;
+		memcpy(evinfo.b_furi, evinfo.b_turi, len);
+		evinfo.b_furi[len] = '\0';
+		evinfo.s_furi.len = len;
+	}
+
+	if(ri->auth_proxy.len > 0) {
+		int copy = (ri->auth_proxy.len < (int)(MAX_URI_SIZE - 1))
+						   ? ri->auth_proxy.len
+						   : (int)(MAX_URI_SIZE - 1);
+		memcpy(evinfo.s_ouri.s, ri->auth_proxy.s, copy);
+		evinfo.s_ouri.s[copy] = '\0';
+		evinfo.s_ouri.len = copy;
+	}
+
+	if(ri->socket.len > 0) {
+		int copy = (ri->socket.len < (int)(MAX_URI_SIZE - 1))
+						   ? ri->socket.len
+						   : (int)(MAX_URI_SIZE - 1);
+		memcpy(evinfo.s_sock.s, ri->socket.s, copy);
+		evinfo.s_sock.s[copy] = '\0';
+		evinfo.s_sock.len = copy;
+	}
+
+	if(ri->auth_username.len > 0) {
+		int copy = (ri->auth_username.len < (int)(sizeof(evinfo.b_auser) - 1))
+						   ? ri->auth_username.len
+						   : (int)(sizeof(evinfo.b_auser) - 1);
+		memcpy(evinfo.s_auser.s, ri->auth_username.s, copy);
+		evinfo.s_auser.s[copy] = '\0';
+		evinfo.s_auser.len = copy;
+	}
+
+	if(ri->l_uuid.len > 0) {
+		int copy = (ri->l_uuid.len < (int)(MAX_UAC_LUUID_SIZE - 1))
+						   ? ri->l_uuid.len
+						   : (int)(MAX_UAC_LUUID_SIZE - 1);
+		memcpy(evinfo.s_l_uuid.s, ri->l_uuid.s, copy);
+		evinfo.s_l_uuid.s[copy] = '\0';
+		evinfo.s_l_uuid.len = copy;
+
+		if(copy < (int)(MAX_UACD_SIZE)) {
+			memcpy(evinfo.s_evparam.s, evinfo.s_l_uuid.s, copy);
+			evinfo.s_evparam.s[copy] = '\0';
+			evinfo.s_evparam.len = copy;
+		}
+	}
+
+	if(msg != NULL) {
+		if(parse_headers(msg, HDR_CSEQ_F, 0) >= 0 && get_cseq(msg) != NULL) {
+			str2int(&(get_cseq(msg)->number), &evinfo.cseqno);
+		}
+		if(parse_headers(msg, HDR_CALLID_F, 0) >= 0 && msg->callid != NULL) {
+			cid = msg->callid->body;
+			trim(&cid);
+			if(cid.len > 0 && cid.len < (int)sizeof(evinfo.b_callid)) {
+				memcpy(evinfo.s_callid.s, cid.s, cid.len);
+				evinfo.s_callid.s[cid.len] = '\0';
+				evinfo.s_callid.len = cid.len;
+			}
+		}
+	}
+
+	uac_req_run_event_route(msg, &evinfo, ps->code);
+}
+
 void uac_reg_tm_callback(struct cell *t, int type, struct tmcb_params *ps)
 {
 	char *uuid;
@@ -932,6 +1037,7 @@ void uac_reg_tm_callback(struct cell *t, int type, struct tmcb_params *ps)
 		}
 
 		ri->flags |= UAC_REG_AUTHSENT;
+		uac_reg_run_reply_event(ri, ps);
 		lock_release(ri->lock);
 		return;
 	}
@@ -970,6 +1076,7 @@ error:
 done:
 	if(ri) {
 		ri->flags &= ~(UAC_REG_ONGOING | UAC_REG_AUTHSENT);
+		uac_reg_run_reply_event(ri, ps);
 		lock_release(ri->lock);
 	}
 	shm_free(uuid);

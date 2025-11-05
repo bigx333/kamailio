@@ -45,57 +45,34 @@
 #include "uac_send.h"
 #include "uac_reg.h"
 
-#define UAC_SEND_FL_HA1 (1 << 0)
-
-#define MAX_UACH_SIZE 2048
-#define MAX_UACB_SIZE 32768
-#define MAX_UACD_SIZE 128
-
 /** TM bind */
 static struct tm_binds _uac_send_tmb = {0};
 
-typedef struct _uac_send_info
-{
-	unsigned int flags;
-	char b_method[32];
-	str s_method;
-	char b_ruri[MAX_URI_SIZE];
-	str s_ruri;
-	char b_turi[MAX_URI_SIZE];
-	str s_turi;
-	char b_ttag[128];
-	str s_ttag;
-	char b_furi[MAX_URI_SIZE];
-	str s_furi;
-	char b_ftag[128];
-	str s_ftag;
-	char b_callid[128];
-	str s_callid;
-	char b_hdrs[MAX_UACH_SIZE];
-	str s_hdrs;
-	char b_body[MAX_UACB_SIZE];
-	str s_body;
-	char b_ouri[MAX_URI_SIZE];
-	str s_ouri;
-	char b_sock[MAX_URI_SIZE];
-	str s_sock;
-	char b_auser[128];
-	str s_auser;
-	char b_apasswd[64];
-	str s_apasswd;
-	char b_evparam[MAX_UACD_SIZE];
-	str s_evparam;
-	unsigned int cseqno;
-	unsigned int fr_timeout;
-	unsigned int fr_inv_timeout;
-	unsigned int evroute;
-	unsigned int evcode;
-	unsigned int evtype;
-} uac_send_info_t;
-
-static struct _uac_send_info _uac_req;
+static uac_send_info_t _uac_req;
 
 extern str uac_event_callback;
+
+void uac_send_info_init(uac_send_info_t *info)
+{
+	if(info == NULL)
+		return;
+	memset(info, 0, sizeof(*info));
+	info->s_method.s = info->b_method;
+	info->s_ruri.s = info->b_ruri;
+	info->s_turi.s = info->b_turi;
+	info->s_ttag.s = info->b_ttag;
+	info->s_furi.s = info->b_furi;
+	info->s_ftag.s = info->b_ftag;
+	info->s_hdrs.s = info->b_hdrs;
+	info->s_body.s = info->b_body;
+	info->s_ouri.s = info->b_ouri;
+	info->s_auser.s = info->b_auser;
+	info->s_apasswd.s = info->b_apasswd;
+	info->s_callid.s = info->b_callid;
+	info->s_sock.s = info->b_sock;
+	info->s_evparam.s = info->b_evparam;
+	info->s_l_uuid.s = info->b_l_uuid;
+}
 
 void uac_send_info_copy(uac_send_info_t *src, uac_send_info_t *dst)
 {
@@ -114,6 +91,7 @@ void uac_send_info_copy(uac_send_info_t *src, uac_send_info_t *dst)
 	dst->s_callid.s = dst->b_callid;
 	dst->s_sock.s = dst->b_sock;
 	dst->s_evparam.s = dst->b_evparam;
+	dst->s_l_uuid.s = dst->b_l_uuid;
 }
 
 uac_send_info_t *uac_send_info_clone(uac_send_info_t *ur)
@@ -183,6 +161,10 @@ int pv_get_uac_req(struct sip_msg *msg, pv_param_t *param, pv_value_t *res)
 			if(_uac_req.s_sock.len <= 0)
 				return pv_get_null(msg, param, res);
 			return pv_get_strval(msg, param, res, &_uac_req.s_sock);
+		case 13:
+			if(_uac_req.s_l_uuid.len <= 0)
+				return pv_get_null(msg, param, res);
+			return pv_get_strval(msg, param, res, &_uac_req.s_l_uuid);
 		case 14:
 			if(_uac_req.s_evparam.len <= 0)
 				return pv_get_null(msg, param, res);
@@ -248,6 +230,7 @@ int pv_set_uac_req(
 				_uac_req.fr_timeout = 0;
 				_uac_req.fr_inv_timeout = 0;
 				_uac_req.s_evparam.len = 0;
+				_uac_req.s_l_uuid.len = 0;
 			}
 			break;
 		case 1:
@@ -448,6 +431,23 @@ int pv_set_uac_req(
 			_uac_req.s_sock.s[tval->rs.len] = '\0';
 			_uac_req.s_sock.len = tval->rs.len;
 			break;
+		case 13:
+			if(tval == NULL) {
+				_uac_req.s_l_uuid.len = 0;
+				return 0;
+			}
+			if(!(tval->flags & PV_VAL_STR)) {
+				LM_ERR("Invalid value type\n");
+				return -1;
+			}
+			if(tval->rs.len >= MAX_UAC_LUUID_SIZE) {
+				LM_ERR("Value size too big\n");
+				return -1;
+			}
+			memcpy(_uac_req.s_l_uuid.s, tval->rs.s, tval->rs.len);
+			_uac_req.s_l_uuid.s[tval->rs.len] = '\0';
+			_uac_req.s_l_uuid.len = tval->rs.len;
+			break;
 		case 14:
 			if(tval == NULL) {
 				_uac_req.s_evparam.len = 0;
@@ -622,6 +622,8 @@ int pv_parse_uac_req_name(pv_spec_p sp, str *in)
 				sp->pvp.pvn.u.isname.name.n = 16;
 			else if(strncmp(in->s, "cseqno", 6) == 0)
 				sp->pvp.pvn.u.isname.name.n = 18;
+			else if(strncmp(in->s, "l_uuid", 6) == 0)
+				sp->pvp.pvn.u.isname.name.n = 13;
 			else
 				goto error;
 			break;
@@ -668,21 +670,7 @@ void uac_req_init(void)
 		memset(&_uac_send_tmb, 0, sizeof(struct tm_binds));
 		return;
 	}
-	memset(&_uac_req, 0, sizeof(struct _uac_send_info));
-	_uac_req.s_ruri.s = _uac_req.b_ruri;
-	_uac_req.s_furi.s = _uac_req.b_furi;
-	_uac_req.s_ftag.s = _uac_req.b_ftag;
-	_uac_req.s_turi.s = _uac_req.b_turi;
-	_uac_req.s_ttag.s = _uac_req.b_ttag;
-	_uac_req.s_ouri.s = _uac_req.b_ouri;
-	_uac_req.s_hdrs.s = _uac_req.b_hdrs;
-	_uac_req.s_body.s = _uac_req.b_body;
-	_uac_req.s_method.s = _uac_req.b_method;
-	_uac_req.s_auser.s = _uac_req.b_auser;
-	_uac_req.s_apasswd.s = _uac_req.b_apasswd;
-	_uac_req.s_callid.s = _uac_req.b_callid;
-	_uac_req.s_sock.s = _uac_req.b_sock;
-	_uac_req.s_evparam.s = _uac_req.b_evparam;
+	uac_send_info_init(&_uac_req);
 	return;
 }
 
@@ -720,8 +708,6 @@ int uac_send_tmdlg(dlg_t *tmdlg, sip_msg_t *rpl)
 	tmdlg->state = DLG_CONFIRMED;
 	return 0;
 }
-
-#define MAX_UACH_SIZE 2048
 
 /**
  *
