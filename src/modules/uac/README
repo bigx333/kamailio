@@ -1149,6 +1149,15 @@ failure_route[REMOTE_AUTH] {
        timeout. In order for this to work, please also enable TM module
        "enable_uac_fr" modparam.
 
+   Remote registrations automatically set $uac_req(evroute)=1 for each
+   REGISTER issued by the worker. Every SIP reply handled by the worker
+   triggers event_route[uac:reply] (401/407 challenges, 423 interval-too-
+   brief, final 2xx, etc.) whenever the route is defined. During this
+   callback $uac_req(l_uuid) exposes the local UUID of the registration
+   record (the same value is mirrored in $uac_req(evparam) for backwards
+   compatibility), allowing real-time integrations without polling
+   uac.reg_dump.
+
    Example 1.44. event_route[uac:reply] usage
 ...
 $uac_req(method)="OPTIONS";
