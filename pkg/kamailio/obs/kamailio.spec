@@ -188,13 +188,17 @@ Conflicts:  kamailio-acc_json < %ver
 Conflicts:  kamailio-auth-ephemeral < %ver, kamailio-bdb < %ver
 Conflicts:  kamailio-carrierroute < %ver, kamailio-cpl < %ver
 Conflicts:  kamailio-dialplan < %ver, kamailio-dnssec < %ver
+Conflicts:  kamailio-gcrypt < %ver
 Conflicts:  kamailio-geoip < %ver, kamailio-gzcompress < %ver
 Conflicts:  kamailio-http_client < %ver
 Conflicts:  kamailio-ims < %ver, kamailio-java < %ver, kamailio-json < %ver
 Conflicts:  kamailio-jwt < %ver
+Conflicts:  kamailio-kafka < %ver
 Conflicts:  kamailio-kazoo < %ver
 Conflicts:  kamailio-lcr < %ver, kamailio-ldap < %ver, kamailio-lost < %ver, kamailio-lua < %ver
+Conflicts:  kamailio-mqtt < %ver
 Conflicts:  kamailio-nats < %ver
+Conflicts:  kamailio-nghttp2 < %ver
 Conflicts:  kamailio-rabbitmq < %ver
 Conflicts:  kamailio-memcached < %ver, kamailio-mongodb < %ver, kamailio-mysql < %ver
 Conflicts:  kamailio-outbound < %ver, kamailio-perl < %ver
@@ -213,6 +217,7 @@ Conflicts:  kamailio-uuid < %ver
 Requires:  systemd
 BuildRequires:  systemd-devel
 BuildRequires: bison
+BuildRequires: cmake
 BuildRequires: flex
 BuildRequires: which
 BuildRequires: make
@@ -398,6 +403,16 @@ suspended when sending the event, to be resumed at a later point, maybe triggere
 %endif
 
 
+%package    gcrypt
+Summary:    Module provides various cryptography tools for use in Kamailio
+Group:      %{PKGGROUP}
+Requires:   libgcrypt, kamailio = %ver
+BuildRequires:  libgcrypt-devel
+
+%description    gcrypt
+Module provides various cryptography tools for use in Kamailio.
+
+
 %package    geoip
 Summary:    MaxMind GeoIP support for Kamailio
 Group:      %{PKGGROUP}
@@ -516,6 +531,17 @@ This module provides JWT (JSON Web Token) functions to be used in Kamailio confi
 It relies on libjwt (at least v1.12.0) library (https://github.com/benmcollins/libjwt).
 
 
+%package    kafka
+Summary:    Module produces and sends messages to a Kafka server
+Group:      %{PKGGROUP}
+Requires:   librdkafka, kamailio = %ver
+BuildRequires:  librdkafka-devel
+
+%description    kafka
+Kafka module for Kamailio.
+Module produces and sends messages to a Kafka server.
+
+
 %if %{with kazoo}
 %package    kazoo
 Summary:    Kazoo middle layer connector support for Kamailio
@@ -613,6 +639,16 @@ MongoDB database connectivity for Kamailio.
 %endif
 
 
+%package    mqtt
+Summary:    Module allows bidirectional publish/subscribe communication by connecting Kamailio to a MQTT Broker
+Group:      %{PKGGROUP}
+Requires:   mosquitto, kamailio = %ver
+BuildRequires:  mosquitto-devel 
+
+%description    mqtt
+Module allows bidirectional publish/subscribe communication by connecting Kamailio to a MQTT Broker.
+
+
 %package    mysql
 Summary:    MySQL database connectivity for Kamailio
 Group:      %{PKGGROUP}
@@ -639,6 +675,16 @@ BuildRequires:    libnats-devel
 %description    nats
 The module provides an NATS consumer for Kamailio. NATS is a real time distributed messaging platform, more details about it can be found at nats.io.
 %endif
+
+
+%package    nghttp2
+Summary:    Module implements an embedded HTTP/2 server using nghttpd2 library
+Group:      %{PKGGROUP}
+Requires:   libnghttp2, kamailio = %ver
+BuildRequires:    libnghttp2-devel
+
+%description    nghttp2
+Module implements an embedded HTTP/2 server using nghttpd2 library
 
 
 %package    outbound
@@ -1130,6 +1176,7 @@ dnssec \
 %if %{with evapi}
 evapi \
 %endif
+gcrypt \
 geoip2 \
 gzcompress \
 h350 \
@@ -1162,6 +1209,7 @@ json \
 %endif
 jsonrpcc \
 jwt \
+kafka \
 %if %{with kazoo}
 kazoo \
 %endif
@@ -1178,6 +1226,7 @@ lwsc \
 memcached \
 %endif
 misc_radius \
+mqtt \
 %if %{with nats}
 nats \
 %endif
@@ -1187,6 +1236,7 @@ ndb_mongodb \
 %if %{with redis}
 ndb_redis \
 %endif
+nghttp2 \
 outbound \
 peering \
 %if %{with phonenum}
@@ -1741,6 +1791,12 @@ fi
 %endif
 
 
+%files      gcrypt
+%defattr(-,root,root)
+%doc %{_docdir}/kamailio/modules/README.gcrypt
+%{_libdir}/kamailio/modules/gcrypt.so
+
+
 %files      geoip
 %defattr(-,root,root)
 %doc %{_docdir}/kamailio/modules/README.geoip2
@@ -1827,6 +1883,12 @@ fi
 %defattr(-,root,root)
 %doc %{_docdir}/kamailio/modules/README.jwt
 %{_libdir}/kamailio/modules/jwt.so
+
+
+%files      kafka
+%defattr(-,root,root)
+%doc %{_docdir}/kamailio/modules/README.kafka
+%{_libdir}/kamailio/modules/kafka.so
 
 
 %if %{with kazoo}
@@ -1974,6 +2036,12 @@ fi
 %endif
 
 
+%files      mqtt
+%defattr(-,root,root)
+%doc %{_docdir}/kamailio/modules/README.mqtt
+%{_libdir}/kamailio/modules/mqtt.so
+
+
 %files      mysql
 %defattr(-,root,root)
 %doc %{_docdir}/kamailio/modules/README.db_mysql
@@ -1990,6 +2058,12 @@ fi
 %doc %{_docdir}/kamailio/modules/README.nats
 %{_libdir}/kamailio/modules/nats.so
 %endif
+
+
+%files      nghttp2
+%defattr(-,root,root)
+%doc %{_docdir}/kamailio/modules/README.nghttp2
+%{_libdir}/kamailio/modules/nghttp2.so
 
 
 %files      outbound

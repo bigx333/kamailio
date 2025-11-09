@@ -41,12 +41,14 @@ static int str_eq_reply(const redisReply *r, const char *s)
 
 static redisReply *get_field(redisReply *r, const char *field)
 {
+	size_t i;
+
 	if(!r)
 		return NULL;
 
 	if(r->type == REDIS_REPLY_ARRAY) {
 		// Treat as alternating field/value list
-		for(size_t i = 0; i + 1 < r->elements; i += 2) {
+		for(i = 0; i + 1 < r->elements; i += 2) {
 			redisReply *k = r->element[i];
 			redisReply *v = r->element[i + 1];
 			if(str_eq_reply(k, field))
@@ -60,6 +62,8 @@ static redisReply *get_field(redisReply *r, const char *field)
 
 static int replica_list_init(redisReply *reply, struct reply_list *list)
 {
+	size_t i;
+
 	if(!reply || reply->type != REDIS_REPLY_ARRAY || reply->elements == 0) {
 		LM_ERR("Invalid reply for replica list\n");
 		return -1;
@@ -74,7 +78,7 @@ static int replica_list_init(redisReply *reply, struct reply_list *list)
 	list->head = NULL;
 	list->tail = NULL;
 
-	for(size_t i = 0; i < reply->elements; i++) {
+	for(i = 0; i < reply->elements; i++) {
 		struct reply_node *node;
 
 		/*
@@ -150,12 +154,14 @@ int replica_list_free(struct reply_list *list)
 
 static redisReply *replica_list_pop(struct reply_list *list, size_t idx)
 {
-	struct reply_node *current = list->head;
+	struct reply_node *current = NULL;
 	struct reply_node *prev = NULL;
 	size_t current_idx = 0;
 	if(!list || idx >= list->count) {
 		return NULL;
 	}
+
+	current = list->head;
 
 	//traverse the list to the idx-th node and remove it from the list also return it
 	while(current && current_idx < idx) {
