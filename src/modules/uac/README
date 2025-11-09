@@ -1158,6 +1158,22 @@ failure_route[REMOTE_AUTH] {
    compatibility), allowing real-time integrations without polling
    uac.reg_dump.
 
+   When the event is executed as part of branch failure handling
+   (i.e., $uac_req(evroute)=2 and TM parameter "enable_uac_fr" is enabled),
+   the UAC module also exposes full failure context:
+
+     * $uac_req(evcode)   - Positive SIP status code. For internal/TM
+       failures without a network reply, this value is mapped from the
+       internal error to a SIP error (e.g., 500 or 408).
+     * $uac_req(evicode)  - Raw internal error code (can be negative)
+       as received from TM; 0 when a real SIP reply was received.
+     * $uac_req(evreason) - Human-readable reason phrase. When a real
+       SIP reply is available, its reason phrase is used; otherwise a
+       textual description derived from the internal error is provided.
+
+   This allows centralizing trunk status updates in a single place without
+   relying on reply_route or polling.
+
    Example 1.44. event_route[uac:reply] usage
 ...
 $uac_req(method)="OPTIONS";
