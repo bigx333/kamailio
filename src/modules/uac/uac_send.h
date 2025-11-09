@@ -29,6 +29,7 @@
 #define MAX_UACB_SIZE 32768
 #define MAX_UACD_SIZE 128
 #define MAX_UAC_LUUID_SIZE 256
+#define MAX_UACRSN_SIZE 256
 
 typedef struct _uac_send_info
 {
@@ -59,6 +60,10 @@ typedef struct _uac_send_info
 	str s_evparam;
 	char b_l_uuid[MAX_UAC_LUUID_SIZE];
 	str s_l_uuid;
+	/* extended event reporting */
+	int evicode; /* raw internal/TM code (can be negative) */
+	char b_evreason[MAX_UACRSN_SIZE];
+	str s_evreason; /* human readable reason (SIP or mapped from internal) */
 	unsigned int cseqno;
 	unsigned int evroute;
 	unsigned int evcode;

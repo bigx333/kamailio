@@ -1329,13 +1329,37 @@ failure_route[REMOTE_AUTH] {
 		</itemizedlist>
 		</para>
 		<para>
-		The remote registration worker automatically sets <emphasis>$uac_req(evroute)</emphasis>=1
+			The remote registration worker automatically sets <emphasis>$uac_req(evroute)</emphasis>=1
 		before sending every REGISTER refresh. Consequently, any SIP reply handled by the worker
 		(401/407 challenges, 423 interval-too-brief, final 2xx replies, and failures) will trigger
 		<function moreinfo="none">event_route[uac:reply]</function> when it is defined. During that callback
 		<emphasis>$uac_req(l_uuid)</emphasis> exposes the local UUID of the registration record (the same value
 		is mirrored into <emphasis>$uac_req(evparam)</emphasis> for backwards compatibility), enabling real-time
-		integrations without polling <emphasis>uac.reg_dump</emphasis>.
+			integrations without polling <emphasis>uac.reg_dump</emphasis>.
+			</para>
+			<para>
+			For centralized trunk status processing, the following additional pseudo-variables are
+			exposed during <function moreinfo="none">event_route[uac:reply]</function>:
+			</para>
+			<itemizedlist>
+				<listitem><para>
+					<emphasis>$uac_req(evicode)</emphasis> – raw internal/TM error code (can be negative).
+					Set to 0 when a real SIP reply was received.
+				</para></listitem>
+				<listitem><para>
+					<emphasis>$uac_req(evreason)</emphasis> – human-readable reason phrase.
+					When a SIP reply is available, its reason phrase is exposed; otherwise a
+					text derived from the internal error is provided.
+				</para></listitem>
+				<listitem><para>
+					<emphasis>$uac_req(evcode)</emphasis> – positive SIP status code. For internal/TM failures
+					(without a network reply), the code is mapped from the internal error to a SIP code.
+				</para></listitem>
+			</itemizedlist>
+			<para>
+			These variables are also available when <emphasis>$uac_req(evroute)=2</emphasis> and the TM module
+			parameter <emphasis>enable_uac_fr</emphasis> is enabled, so timeouts and branch failures are reported
+			without relying on <function>reply_route</function> or polling.
 		</para>
 		<example>
 		<title><function>event_route[uac:reply]</function> usage</title>
