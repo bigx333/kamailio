@@ -39,6 +39,7 @@
 #include "../../core/parser/contact/parse_contact.h"
 #include "../../core/fmsg.h"
 #include "../../core/kemi.h"
+#include "../../core/error.h"
 
 #include "auth.h"
 #include "auth_hdr.h"
@@ -72,6 +73,8 @@ void uac_send_info_init(uac_send_info_t *info)
 	info->s_sock.s = info->b_sock;
 	info->s_evparam.s = info->b_evparam;
 	info->s_l_uuid.s = info->b_l_uuid;
+	info->s_evreason.s = info->b_evreason;
+	info->evicode = 0;
 }
 
 void uac_send_info_copy(uac_send_info_t *src, uac_send_info_t *dst)
@@ -92,6 +95,7 @@ void uac_send_info_copy(uac_send_info_t *src, uac_send_info_t *dst)
 	dst->s_sock.s = dst->b_sock;
 	dst->s_evparam.s = dst->b_evparam;
 	dst->s_l_uuid.s = dst->b_l_uuid;
+	dst->s_evreason.s = dst->b_evreason;
 }
 
 uac_send_info_t *uac_send_info_clone(uac_send_info_t *ur)
@@ -189,6 +193,12 @@ int pv_get_uac_req(struct sip_msg *msg, pv_param_t *param, pv_value_t *res)
 			if(_uac_req.s_ttag.len <= 0)
 				return pv_get_null(msg, param, res);
 			return pv_get_strval(msg, param, res, &_uac_req.s_ttag);
+		case 23:
+			return pv_get_sintval(msg, param, res, _uac_req.evicode);
+		case 24:
+			if(_uac_req.s_evreason.len <= 0)
+				return pv_get_null(msg, param, res);
+			return pv_get_strval(msg, param, res, &_uac_req.s_evreason);
 
 		default:
 			return pv_get_uintval(msg, param, res, _uac_req.flags);
@@ -565,6 +575,34 @@ int pv_set_uac_req(
 			_uac_req.s_ttag.s[tval->rs.len] = '\0';
 			_uac_req.s_ttag.len = tval->rs.len;
 			break;
+		case 23:
+			if(tval == NULL) {
+				_uac_req.evicode = 0;
+				return 0;
+			}
+			if(!(tval->flags & PV_VAL_INT)) {
+				LM_ERR("Invalid value type\n");
+				return -1;
+			}
+			_uac_req.evicode = tval->ri;
+			break;
+		case 24:
+			if(tval == NULL) {
+				_uac_req.s_evreason.len = 0;
+				return 0;
+			}
+			if(!(tval->flags & PV_VAL_STR)) {
+				LM_ERR("Invalid value type\n");
+				return -1;
+			}
+			if(tval->rs.len >= MAX_UACRSN_SIZE) {
+				LM_ERR("Value size too big\n");
+				return -1;
+			}
+			memcpy(_uac_req.s_evreason.s, tval->rs.s, tval->rs.len);
+			_uac_req.s_evreason.s[tval->rs.len] = '\0';
+			_uac_req.s_evreason.len = tval->rs.len;
+			break;
 	}
 	return 0;
 }
@@ -578,6 +616,12 @@ int pv_parse_uac_req_name(pv_spec_p sp, str *in)
 		case 3:
 			if(strncmp(in->s, "all", 3) == 0)
 				sp->pvp.pvn.u.isname.name.n = 0;
+			else
+				goto error;
+			break;
+		case 8:
+			if(strncmp(in->s, "evreason", 8) == 0)
+				sp->pvp.pvn.u.isname.name.n = 24;
 			else
 				goto error;
 			break;
@@ -634,6 +678,8 @@ int pv_parse_uac_req_name(pv_spec_p sp, str *in)
 				sp->pvp.pvn.u.isname.name.n = 10;
 			else if(strncmp(in->s, "evparam", 7) == 0)
 				sp->pvp.pvn.u.isname.name.n = 14;
+			else if(strncmp(in->s, "evicode", 7) == 0)
+				sp->pvp.pvn.u.isname.name.n = 23;
 			else
 				goto error;
 			break;
@@ -720,6 +766,10 @@ void uac_req_run_event_route(sip_msg_t *msg, uac_send_info_t *tp, int rcode)
 	sip_msg_t *fmsg;
 	sr_kemi_eng_t *keng = NULL;
 	int kemi_evroute = 0;
+    int mapped_code = rcode;
+    char rbuf[MAX_UACRSN_SIZE];
+    int rlen = 0;
+    int sip_error = 0;
 
 	if(uac_event_callback.s != NULL && uac_event_callback.len > 0) {
 		keng = sr_kemi_eng_get();
@@ -741,7 +791,53 @@ void uac_req_run_event_route(sip_msg_t *msg, uac_send_info_t *tp, int rcode)
 	}
 
 	uac_send_info_copy(tp, &_uac_req);
-	_uac_req.evcode = rcode;
+	/* default values */
+	_uac_req.evicode = 0;
+	_uac_req.s_evreason.len = 0;
+	/* map internal errors to SIP and set reason */
+	if(rcode > 0) {
+		mapped_code = rcode;
+		/* try to use the reply reason if available */
+		if(msg != NULL && msg->first_line.type == SIP_REPLY
+				&& msg->first_line.u.reply.reason.s != NULL
+				&& msg->first_line.u.reply.reason.len > 0) {
+			int copy = (msg->first_line.u.reply.reason.len < (int)(MAX_UACRSN_SIZE - 1))
+						? msg->first_line.u.reply.reason.len
+						: (int)(MAX_UACRSN_SIZE - 1);
+			memcpy(_uac_req.s_evreason.s, msg->first_line.u.reply.reason.s, copy);
+			_uac_req.s_evreason.s[copy] = '\0';
+			_uac_req.s_evreason.len = copy;
+		} else {
+			/* fallback to generic reason */
+			const char *et = error_text(mapped_code);
+			if(et != NULL) {
+				rlen = snprintf(rbuf, sizeof(rbuf), "%s", et);
+				if(rlen > 0) {
+					int copy = (rlen < (int)(MAX_UACRSN_SIZE - 1)) ? rlen : (int)(MAX_UACRSN_SIZE - 1);
+					memcpy(_uac_req.s_evreason.s, rbuf, copy);
+					_uac_req.s_evreason.s[copy] = '\0';
+					_uac_req.s_evreason.len = copy;
+				}
+			}
+		}
+	} else {
+		/* internal/TM error (negative or 0) */
+		_uac_req.evicode = rcode;
+		/* build SIP code + human readable reason */
+		/* err2reason_phrase returns phrase with internal code and signature */
+		rlen = err2reason_phrase(rcode, &sip_error, rbuf, sizeof(rbuf), "UAC");
+		if(rlen > 0) {
+			int copy = (rlen < (int)(MAX_UACRSN_SIZE - 1)) ? rlen : (int)(MAX_UACRSN_SIZE - 1);
+			memcpy(_uac_req.s_evreason.s, rbuf, copy);
+			_uac_req.s_evreason.s[copy] = '\0';
+			_uac_req.s_evreason.len = copy;
+		}
+		if(sip_error > 0)
+			mapped_code = sip_error;
+		else
+			mapped_code = 500; /* fallback */
+	}
+	_uac_req.evcode = mapped_code;
 	if(msg == NULL) {
 		_uac_req.evtype = 2;
 		fmsg = faked_msg_get_next();
@@ -754,8 +850,8 @@ void uac_req_run_event_route(sip_msg_t *msg, uac_send_info_t *tp, int rcode)
 	set_route_type(REQUEST_ROUTE);
 	init_run_actions_ctx(&ctx);
 
-	if(kemi_evroute == 1) {
-		str evrtname = str_init("uac:reply");
+		if(kemi_evroute == 1) {
+			str evrtname = str_init("uac:reply");
 
 		if(sr_kemi_route(
 				   keng, fmsg, EVENT_ROUTE, &uac_event_callback, &evrtname)
@@ -765,7 +861,7 @@ void uac_req_run_event_route(sip_msg_t *msg, uac_send_info_t *tp, int rcode)
 	} else {
 		run_top_route(event_rt.rlist[rt], fmsg, 0);
 	}
-	set_route_type(backup_rt);
+		set_route_type(backup_rt);
 }
 
 /**
@@ -783,10 +879,10 @@ void uac_resend_tm_callback(struct cell *t, int type, struct tmcb_params *ps)
 	}
 	tp = (uac_send_info_t *)(*ps->param);
 
-	if(tp->evroute != 0 && ps->code > 0) {
-		uac_req_run_event_route(
-				(ps->rpl == FAKED_REPLY) ? NULL : ps->rpl, tp, ps->code);
-	}
+    if(tp->evroute != 0) {
+        uac_req_run_event_route(
+                        (ps->rpl == FAKED_REPLY) ? NULL : ps->rpl, tp, ps->code);
+    }
 
 done:
 	if(tp != NULL) {
@@ -821,10 +917,10 @@ void uac_send_tm_callback(struct cell *t, int type, struct tmcb_params *ps)
 	}
 	tp = (uac_send_info_t *)(*ps->param);
 
-	if(tp->evroute != 0 && ps->code > 0) {
-		uac_req_run_event_route(
-				(ps->rpl == FAKED_REPLY) ? NULL : ps->rpl, tp, ps->code);
-	}
+    if(tp->evroute != 0) {
+        uac_req_run_event_route(
+                        (ps->rpl == FAKED_REPLY) ? NULL : ps->rpl, tp, ps->code);
+    }
 
 	if((ps->code != 401 && ps->code != 407) || tp->s_apasswd.len <= 0) {
 		LM_DBG("completed with status %d\n", ps->code);
